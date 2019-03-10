@@ -1,0 +1,125 @@
+apiVersion: apps/v1beta2
+kind: Deployment
+metadata:
+  name: {{ template "flux.fullname" . }}
+  labels:
+    app: {{ template "flux.name" . }}
+    chart: {{ template "flux.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ template "flux.name" . }}
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      {{- if .Values.prometheus.enabled }}
+      annotations:
+        prometheus.io.scrape: "true"
+      {{- end }}
+      labels:
+        app: {{ template "flux.name" . }}
+        release: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ template "flux.serviceAccountName" . }}
+      volumes:
+      - name: kubedir
+        configMap:
+          name: {{ template "flux.fullname" . }}-kube-config
+      {{- if .Values.ssh.known_hosts }}
+      - name: sshdir
+        configMap:
+          name: {{ template "flux.fullname" . }}-ssh-config
+          defaultMode: 0600
+      {{- end }}
+      - name: git-key
+        secret:
+          {{- if .Values.git.secretName }}
+          secretName: {{ .Values.git.secretName }}
+          {{- else }}
+          secretName: {{ template "flux.fullname" . }}-git-deploy
+          {{- end }}
+          defaultMode: 0400
+      - name: git-keygen
+        emptyDir:
+          medium: Memory
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+          - name: http
+            containerPort: 3030
+            protocol: TCP
+          volumeMounts:
+          - name: kubedir
+            mountPath: /root/.kubectl
+          {{- if .Values.ssh.known_hosts }}
+          - name: sshdir
+            mountPath: /root/.ssh
+            readOnly: true
+          {{- end }}
+          - name: git-key
+            mountPath: /etc/fluxd/ssh
+            readOnly: true
+          - name: git-keygen
+            mountPath: /var/fluxd/keygen
+          env:
+          - name: KUBECONFIG
+            value: /root/.kubectl/config
+          {{- if .Values.extraEnvs }}
+{{ toYaml .Values.extraEnvs | indent 10 }}
+          {{- end }}
+          args:
+          - --ssh-keygen-dir=/var/fluxd/keygen
+          - --k8s-secret-name={{ template "flux.fullname" . }}-git-deploy
+          - --memcached-hostname={{ template "flux.fullname" . }}-memcached
+          {{- if .Values.memcached.createClusterIP }}
+          - --memcached-service=
+          {{- end }}
+          - --git-url={{ .Values.git.url }}
+          - --git-branch={{ .Values.git.branch }}
+          - --git-path={{ .Values.git.path }}
+          - --git-user={{ .Values.git.user }}
+          - --git-email={{ .Values.git.email }}
+          - --git-set-author={{ .Values.git.setAuthor }}
+          - --git-poll-interval={{ .Values.git.pollInterval }}
+          - --git-timeout={{ .Values.git.timeout }}
+          - --sync-interval={{ .Values.git.pollInterval }}
+          - --git-ci-skip={{ .Values.git.ciSkip }}
+          {{- if .Values.git.label }}
+          - --git-label={{ .Values.git.label }}
+          {{- end }}
+          - --registry-poll-interval={{ .Values.registry.pollInterval }}
+          - --registry-rps={{ .Values.registry.rps }}
+          - --registry-burst={{ .Values.registry.burst }}
+          - --registry-trace={{ .Values.registry.trace }}
+          {{- if .Values.registry.insecureHosts }}
+          - --registry-insecure-host={{ .Values.registry.insecureHosts }}
+          {{- end }}
+          {{- if .Values.registry.cacheExpiry }}
+          - --registry-cache-expiry={{ .Values.registry.cacheExpiry }}
+          {{- end }}
+          {{- if .Values.token }}
+          - --connect=wss://cloud.weave.works/api/flux
+          - --token={{ .Values.token }}
+          {{- end }}
+          {{- if .Values.additionalArgs }}
+{{ toYaml .Values.additionalArgs | indent 10 }}
+          {{- end }}
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+    {{- with .Values.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+    {{- end }}
+    {{- with .Values.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+    {{- end }}
+    {{- with .Values.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+    {{- end }}
