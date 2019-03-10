@@ -11,6 +11,10 @@ import (
 
 	"github.com/justinbarrick/fluxcloud/pkg/config"
 	"github.com/justinbarrick/fluxcloud/pkg/msg"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 // The Slack exporter sends Flux events to a Slack channel via a webhook.
@@ -157,6 +161,26 @@ func (s *Slack) parseSlackChannelConfig(channels string) error {
 
 // Match namespaces from service IDs to Slack channels.
 func (s *Slack) determineChannels(message msg.Message) []string {
+	// creates the in-cluster config
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		panic(err.Error())
+	}
+	// creates the clientset
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	pods, err := clientset.CoreV1().Pods("default").List(metav1.ListOptions{})
+	if err != nil {
+		panic(err.Error())
+	}
+
+	for i, pod := range pods.Items {
+		log.Println(fmt.Sprintf("Pod #%v = %v", i, pod.Name))
+	}
+
 	var channels []string
 	for _, serviceID := range message.Event.ServiceIDs {
 		ns, _, name := serviceID.Components()
