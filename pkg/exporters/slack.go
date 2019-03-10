@@ -159,7 +159,8 @@ func (s *Slack) parseSlackChannelConfig(channels string) error {
 func (s *Slack) determineChannels(message msg.Message) []string {
 	var channels []string
 	for _, serviceID := range message.Event.ServiceIDs {
-		ns, _, _ := serviceID.Components()
+		ns, _, name := serviceID.Components()
+		log.Println("service name =" + name)
 
 		for _, ch := range s.Channels {
 			if ch.Namespace == "*" || ch.Namespace == ns {
