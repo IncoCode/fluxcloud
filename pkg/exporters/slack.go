@@ -178,7 +178,7 @@ func (s *Slack) determineChannels(message msg.Message) []string {
 	}
 
 	for i, pod := range pods.Items {
-		log.Println(fmt.Sprintf("Pod #%v = %v", i, pod.Name))
+		log.Println(fmt.Sprintf("Pod #%v = %v, Annotations = %v", i, pod.Name, pod.Annotations))
 	}
 
 	var channels []string
