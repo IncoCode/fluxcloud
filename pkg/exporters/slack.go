@@ -12,6 +12,7 @@ import (
 	"github.com/justinbarrick/fluxcloud/pkg/config"
 	"github.com/justinbarrick/fluxcloud/pkg/msg"
 
+	"github.com/nlopes/slack"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -19,10 +20,12 @@ import (
 
 // The Slack exporter sends Flux events to a Slack channel via a webhook.
 type Slack struct {
-	Url       string
-	Username  string
-	Channels  []SlackChannel
-	IconEmoji string
+	Url        string // ToDo: delete
+	Username   string
+	Channels   []SlackChannel
+	IconEmoji  string
+	OAuthToken string
+	slackApi   *slack.Client
 }
 
 // Represents a slack message sent to the API
@@ -53,6 +56,11 @@ func NewSlack(config config.Config) (*Slack, error) {
 	s := Slack{}
 
 	s.Url, err = config.Required("slack_url")
+	if err != nil {
+		return nil, err
+	}
+
+	s.OAuthToken, err = config.Required("slack_oauth_token")
 	if err != nil {
 		return nil, err
 	}

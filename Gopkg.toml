@@ -37,3 +37,7 @@
   go-tests = true
   unused-packages = true
 	non-go = true
+
+[[constraint]]
+  name = "github.com/nlopes/slack"
+  version = "0.5.0"
