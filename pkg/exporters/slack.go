@@ -1,8 +1,6 @@
 package exporters
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,6 +11,7 @@ import (
 	"github.com/justinbarrick/fluxcloud/pkg/msg"
 
 	"github.com/nlopes/slack"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -20,24 +19,24 @@ import (
 
 // The Slack exporter sends Flux events to a Slack channel via a webhook.
 type Slack struct {
-	Url        string // ToDo: delete
-	Username   string
-	Channels   []SlackChannel
-	IconEmoji  string
-	OAuthToken string
-	slackApi   *slack.Client
+	Url              string // ToDo: delete
+	Username         string
+	Channels         []SlackChannel // ToDo: delete
+	IconEmoji        string
+	OAuthToken       string
+	slackApi         *slack.Client
+	defaultChannelID string
+	kubernetesClient *kubernetes.Clientset
 }
 
 // Represents a slack message sent to the API
 type SlackMessage struct {
-	Channel     string            `json:"channel"`
-	IconEmoji   string            `json:"icon_emoji"`
-	Username    string            `json:"username"`
-	Attachments []SlackAttachment `json:"attachments"`
+	ChannelID   string
+	Attachments []slack.Attachment
 }
 
 // Represents a section of a slack message that is sent to the API
-type SlackAttachment struct {
+type SlackAttachment struct { // ToDo: delete
 	Color     string `json:"color"`
 	Title     string `json:"title"`
 	TitleLink string `json:"title_link"`
@@ -45,17 +44,19 @@ type SlackAttachment struct {
 }
 
 // Represents a slack channel and the Kubernetes namespace linked to it
-type SlackChannel struct {
+type SlackChannel struct { // ToDo: delete
 	Channel   string `json:"channel"`
 	Namespace string `json:"namespace"`
 }
+
+const slackChannelAnnotationName = "slackChannelId"
 
 // Initialize a new Slack instance
 func NewSlack(config config.Config) (*Slack, error) {
 	var err error
 	s := Slack{}
 
-	s.Url, err = config.Required("slack_url")
+	s.Url, err = config.Required("slack_url") // ToDo: delete
 	if err != nil {
 		return nil, err
 	}
@@ -65,15 +66,33 @@ func NewSlack(config config.Config) (*Slack, error) {
 		return nil, err
 	}
 
-	channels, err := config.Required("slack_channel")
+	channels, err := config.Required("slack_channel") // ToDo: delete
 	if err != nil {
 		return nil, err
 	}
 	s.parseSlackChannelConfig(channels)
 	log.Println(s.Channels)
 
+	s.defaultChannelID, err = config.Required("slack_default_channel_id")
+	if err != nil {
+		return nil, err
+	}
+
 	s.Username = config.Optional("slack_username", "Flux Deployer")
 	s.IconEmoji = config.Optional("slack_icon_emoji", ":star-struck:")
+	s.slackApi = slack.New(s.OAuthToken)
+
+	// creates the in-cluster config
+	clusterConfig, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	// creates the clientset
+	s.kubernetesClient, err = kubernetes.NewForConfig(clusterConfig)
+	if err != nil {
+		return nil, err
+	}
 
 	return &s, nil
 }
@@ -81,24 +100,10 @@ func NewSlack(config config.Config) (*Slack, error) {
 // Send a SlackMessage to Slack
 func (s *Slack) Send(client *http.Client, message msg.Message) error {
 	for _, slackMessage := range s.NewSlackMessage(message) {
-		fmt.Println(slackMessage)
-		b := new(bytes.Buffer)
-		err := json.NewEncoder(b).Encode(slackMessage)
-		if err != nil {
-			log.Print("Could encode message to slack:", err)
-			return err
-		}
+		fmt.Println("Slack message", slackMessage)
 
-		log.Print(string(b.Bytes()))
-		res, err := client.Post(s.Url, "application/json", b)
-		if err != nil {
-			log.Print("Could not post to slack:", err)
-			return err
-		}
-
-		if res.StatusCode != 200 {
-			log.Print("Could not post to slack, status: ", res.Status)
-			return fmt.Errorf("Could not post to slack, status: %d", res.StatusCode)
+		if _, _, err := s.slackApi.PostMessage(slackMessage.ChannelID, slack.MsgOptionAttachments(slackMessage.Attachments...)); err != nil {
+			return fmt.Errorf("Unable to post message to slack, error = %v", err)
 		}
 	}
 
@@ -119,13 +124,11 @@ func (s *Slack) FormatLink(link string, name string) string {
 func (s *Slack) NewSlackMessage(message msg.Message) []SlackMessage {
 	var messages []SlackMessage
 
-	for _, channel := range s.determineChannels(message) {
+	for _, channelID := range s.determineChannels(message) {
 		slackMessage := SlackMessage{
-			Channel:   channel,
-			IconEmoji: s.IconEmoji,
-			Username:  s.Username,
-			Attachments: []SlackAttachment{
-				SlackAttachment{
+			ChannelID: channelID,
+			Attachments: []slack.Attachment{
+				slack.Attachment{
 					Color:     "#4286f4",
 					TitleLink: message.TitleLink,
 					Title:     message.Title,
@@ -146,7 +149,7 @@ func (s *Slack) Name() string {
 
 // Parse the channel configuration string in a backwards
 // compatible manner.
-func (s *Slack) parseSlackChannelConfig(channels string) error {
+func (s *Slack) parseSlackChannelConfig(channels string) error { // ToDo: delete
 	if len(strings.Split(channels, "=")) == 1 {
 		s.Channels = append(s.Channels, SlackChannel{channels, "*"})
 		return nil
@@ -167,38 +170,39 @@ func (s *Slack) parseSlackChannelConfig(channels string) error {
 	return nil
 }
 
+func (s *Slack) getChannelIDByService(namespace string, serviceName string) string {
+	var pod *v1.Pod
+
+	pods, err := s.kubernetesClient.CoreV1().Pods(namespace).List(metav1.ListOptions{})
+	if err != nil {
+		fmt.Println(fmt.Sprintf("Error: unable to get pods with in namespace = %v, serviceName = %v, error = %v", namespace, serviceName, err))
+		return s.defaultChannelID
+	}
+
+	for i, p := range pods.Items {
+		if strings.Contains(p.Name, serviceName) {
+			pod = &pods.Items[i]
+		}
+	}
+
+	if pod == nil {
+		fmt.Println("Unable to find pod with service name = ", serviceName)
+		return s.defaultChannelID
+	}
+
+	if pod.Annotations[slackChannelAnnotationName] != "" {
+		return pod.Annotations[slackChannelAnnotationName]
+	}
+
+	return s.defaultChannelID
+}
+
 // Match namespaces from service IDs to Slack channels.
 func (s *Slack) determineChannels(message msg.Message) []string {
-	// creates the in-cluster config
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		panic(err.Error())
-	}
-	// creates the clientset
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	pods, err := clientset.CoreV1().Pods("default").List(metav1.ListOptions{})
-	if err != nil {
-		panic(err.Error())
-	}
-
-	for i, pod := range pods.Items {
-		log.Println(fmt.Sprintf("Pod #%v = %v, Annotations = %v", i, pod.Name, pod.Annotations))
-	}
-
 	var channels []string
 	for _, serviceID := range message.Event.ServiceIDs {
 		ns, _, name := serviceID.Components()
-		log.Println("service name =" + name)
-
-		for _, ch := range s.Channels {
-			if ch.Namespace == "*" || ch.Namespace == ns {
-				channels = appendIfMissing(channels, ch.Channel)
-			}
-		}
+		channels = appendIfMissing(channels, s.getChannelIDByService(ns, name))
 	}
 	return channels
 }
