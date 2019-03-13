@@ -2,9 +2,7 @@ package exporters
 
 import (
 	"fmt"
-	"log"
 	"net/http"
-	"regexp"
 	"strings"
 
 	"github.com/justinbarrick/fluxcloud/pkg/config"
@@ -19,10 +17,6 @@ import (
 
 // The Slack exporter sends Flux events to a Slack channel via a webhook.
 type Slack struct {
-	Url              string // ToDo: delete
-	Username         string
-	Channels         []SlackChannel // ToDo: delete
-	IconEmoji        string
 	OAuthToken       string
 	slackApi         *slack.Client
 	defaultChannelID string
@@ -56,30 +50,16 @@ func NewSlack(config config.Config) (*Slack, error) {
 	var err error
 	s := Slack{}
 
-	s.Url, err = config.Required("slack_url") // ToDo: delete
-	if err != nil {
-		return nil, err
-	}
-
 	s.OAuthToken, err = config.Required("slack_oauth_token")
 	if err != nil {
 		return nil, err
 	}
-
-	channels, err := config.Required("slack_channel") // ToDo: delete
-	if err != nil {
-		return nil, err
-	}
-	s.parseSlackChannelConfig(channels)
-	log.Println(s.Channels)
 
 	s.defaultChannelID, err = config.Required("slack_default_channel_id")
 	if err != nil {
 		return nil, err
 	}
 
-	s.Username = config.Optional("slack_username", "Flux Deployer")
-	s.IconEmoji = config.Optional("slack_icon_emoji", ":star-struck:")
 	s.slackApi = slack.New(s.OAuthToken)
 
 	// creates the in-cluster config
@@ -145,29 +125,6 @@ func (s *Slack) NewSlackMessage(message msg.Message) []SlackMessage {
 // Return the name of the exporter.
 func (s *Slack) Name() string {
 	return "Slack"
-}
-
-// Parse the channel configuration string in a backwards
-// compatible manner.
-func (s *Slack) parseSlackChannelConfig(channels string) error { // ToDo: delete
-	if len(strings.Split(channels, "=")) == 1 {
-		s.Channels = append(s.Channels, SlackChannel{channels, "*"})
-		return nil
-	}
-
-	re := regexp.MustCompile("([#a-z0-9][a-z0-9._-]*)=([a-z0-9*][-A-Za-z0-9_.]*)")
-	for _, kv := range strings.Split(channels, ",") {
-		if !re.MatchString(kv) {
-			return fmt.Errorf("Could not parse channel/namespace configuration: %s", kv)
-		}
-
-		cn := strings.Split(kv, "=")
-		channel := strings.TrimSpace(cn[0])
-		namespace := strings.TrimSpace(cn[1])
-		s.Channels = append(s.Channels, SlackChannel{channel, namespace})
-	}
-
-	return nil
 }
 
 func (s *Slack) getChannelIDByService(namespace string, serviceName string) string {
