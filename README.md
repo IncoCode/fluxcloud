@@ -18,10 +18,8 @@ To deploy independently, see `examples/fluxcloud.yaml`.
 
 Set the following environment variables in your chosen deployment:
 
-* `SLACK_URL`: the Slack [webhook URL](https://api.slack.com/incoming-webhooks) to use.
-* `SLACK_USERNAME`: the Slack username to use when sending messages.
-* `SLACK_CHANNEL`: the Slack channel to send messages to.
-* `SLACK_ICON_EMOJI`: the Slack emoji to use as the icon.
+* `SLACK_OAUTH_TOKEN`: the Slack OAuth token.
+* `SLACK_DEFAULT_CHANNEL_ID`: the Slack default channel ID to send messages to if it's unable to determine Slack channel ID for a specific service.
 * `GITHUB_URL`: the URL to the Github repository that Flux uses, used for Slack links.
 * `WEBHOOK_URL`: if the exporter is "webhook", then the URL to use for the webhook.
 * `EXPORTER_TYPE` (optional): The type of exporter to use. (Choices: slack, webhook, Default: slack)
@@ -32,7 +30,9 @@ And then apply the configuration:
 kubectl apply -f examples/fluxcloud.yaml
 ```
 
-Set the `--connect` flag on Flux to `--connect=ws://fluxcloud`.
+Set the `--connect` flag on Flux to `--connect=ws://fluxcloud` (or `--connect=ws://127.0.0.1:3032`).
+
+Add `slackChannelId` property in metadata annotations for each of your services with Slack channel ID.
 
 # Exporters
 
